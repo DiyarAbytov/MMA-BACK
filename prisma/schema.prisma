@@ -1,0 +1,78 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ChatStatus {
+  lead
+  client
+  declined
+}
+
+model Chat {
+  id           String     @id
+  name         String
+  isGroup      Boolean    @default(false)
+  status       ChatStatus @default(lead)
+  unreadCount  Int        @default(0)
+  pinned       Boolean    @default(false)
+  archived     Boolean    @default(false)
+  last         String     @default("")
+  lastTs       Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  messages     Message[]
+
+  @@index([status])
+  @@index([lastTs])
+}
+
+model Message {
+  id              String  @id
+  chatId          String
+  from            String
+  to              String?
+  body            String?
+  ts              Int
+  fromMe          Boolean
+  type            String
+  hasMedia        Boolean  @default(false)
+  quotedMessageId String?
+  vcard           String?
+  locLat          Float?
+  locLng          Float?
+  locDesc         String?
+
+  chat Chat @relation(fields: [chatId], references: [id])
+
+  @@index([chatId, ts])
+}
+
+model AnalyticsStream {
+  id        Int      @id @default(autoincrement())
+  chatId    String
+  type      String
+  ts        Int
+  monthKey  String
+  createdAt DateTime @default(now())
+
+  @@index([ts])
+  @@index([monthKey, type])
+}
+
+model AnalyticsMonthly {
+  id        Int      @id @default(autoincrement())
+  chatId    String
+  type      String
+  ts        Int
+  monthKey  String
+  createdAt DateTime @default(now())
+
+  @@unique([chatId, type, monthKey])
+  @@index([monthKey, type])
+}
