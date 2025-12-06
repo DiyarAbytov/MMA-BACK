@@ -5,8 +5,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 
 const app = express();
-app.use(express.json());
 app.use(cors({ origin: "*" }));
+app.use(express.json());
 
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -80,6 +80,6 @@ app.post("/send", async (req, res) => {
   res.sendStatus(200);
 });
 
-server.listen(3001, () =>
-  console.log("WhatsApp + WS: 3001")
-);
+server.listen(3001, () => {
+  console.log("Backend on 3001");
+});
