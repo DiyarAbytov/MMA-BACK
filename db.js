@@ -1,4 +1,3 @@
-// // db.js
 // import Database from "better-sqlite3";
 
 // const db = new Database("whatsapp.db");
@@ -79,7 +78,7 @@ export function upsertDialog({ chatId, name, lastMessage, lastTime }) {
     chatId,
     name: name || chatId,
     lastMessage: lastMessage || "",
-    lastTime: lastTime || Date.now(),
+    lastTime: typeof lastTime === "number" ? lastTime : Date.now(),
   });
 }
 
