@@ -1,4 +1,4 @@
-// index.js
+// index.jx
 import "dotenv/config";
 
 import multer from "multer";
