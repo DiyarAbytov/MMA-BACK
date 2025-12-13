@@ -145,7 +145,12 @@ import Database from "better-sqlite3";
 
 const db = new Database("whatsapp.db");
 
-// ================= dialogs =================
+// норм для VPS: меньше “database is locked” и быстрее чтение
+db.pragma("journal_mode = WAL");
+db.pragma("synchronous = NORMAL");
+db.pragma("busy_timeout = 5000");
+
+// dialogs
 db.exec(`
   CREATE TABLE IF NOT EXISTS dialogs (
     chatId      TEXT PRIMARY KEY,
@@ -155,7 +160,7 @@ db.exec(`
   );
 `);
 
-// ================= messages =================
+// messages
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,11 +177,10 @@ db.exec(`
 `);
 
 db.exec(`
-  CREATE INDEX IF NOT EXISTS idx_messages_chat_ts
-  ON messages(chatId, timestamp);
+  CREATE INDEX IF NOT EXISTS idx_messages_chat_ts_id
+  ON messages(chatId, timestamp, id);
 `);
 
-// ===== dialogs upsert =====
 const upsertDialogStmt = db.prepare(`
   INSERT INTO dialogs (chatId, name, lastMessage, lastTime)
   VALUES (@chatId, @name, @lastMessage, @lastTime)
@@ -190,46 +194,47 @@ const upsertDialogStmt = db.prepare(`
     END
 `);
 
-// ✅ messages UPSERT (главный фикс)
-const upsertMsgStmt = db.prepare(`
-  INSERT INTO messages
+const insertMsgStmt = db.prepare(`
+  INSERT OR IGNORE INTO messages
   (chatId, msgId, sender, text, timestamp, mediaType, mediaUrl, replyTo)
   VALUES (@chatId, @msgId, @sender, @text, @timestamp, @mediaType, @mediaUrl, @replyTo)
-  ON CONFLICT(chatId, msgId) DO UPDATE SET
-    sender = excluded.sender,
-    text = CASE
-      WHEN excluded.text IS NOT NULL AND excluded.text <> '' THEN excluded.text
-      ELSE messages.text
-    END,
-    timestamp = MAX(messages.timestamp, excluded.timestamp),
-    mediaType = COALESCE(excluded.mediaType, messages.mediaType),
-    mediaUrl  = COALESCE(excluded.mediaUrl, messages.mediaUrl),
-    replyTo   = COALESCE(excluded.replyTo, messages.replyTo)
 `);
 
 const getDialogsStmt = db.prepare(`
   SELECT chatId, name, lastMessage, lastTime
   FROM dialogs
-  ORDER BY lastTime DESC
-`);
-
-const countMessagesStmt = db.prepare(`
-  SELECT COUNT(*) as c FROM messages WHERE chatId = ?
+  ORDER BY COALESCE(lastTime, 0) DESC
 `);
 
 const getLatestStmt = db.prepare(`
-  SELECT msgId as id, sender as "from", text, timestamp, mediaType, mediaUrl, replyTo
+  SELECT
+    id as dbId,
+    msgId as id,
+    sender as "from",
+    text,
+    timestamp,
+    mediaType,
+    mediaUrl,
+    replyTo
   FROM messages
   WHERE chatId = ?
-  ORDER BY timestamp DESC
+  ORDER BY timestamp DESC, id DESC
   LIMIT ?
 `);
 
 const getBeforeStmt = db.prepare(`
-  SELECT msgId as id, sender as "from", text, timestamp, mediaType, mediaUrl, replyTo
+  SELECT
+    id as dbId,
+    msgId as id,
+    sender as "from",
+    text,
+    timestamp,
+    mediaType,
+    mediaUrl,
+    replyTo
   FROM messages
   WHERE chatId = ? AND timestamp < ?
-  ORDER BY timestamp DESC
+  ORDER BY timestamp DESC, id DESC
   LIMIT ?
 `);
 
@@ -244,7 +249,13 @@ function safeJsonParse(s) {
 function normalizeDescToAsc(rows) {
   const list = rows.slice().reverse();
   return list.map((r) => ({
-    ...r,
+    id: r.id,
+    dbId: r.dbId,
+    from: r.from, // "me" | "client"
+    text: r.text || "",
+    timestamp: typeof r.timestamp === "number" ? r.timestamp : Date.now(),
+    mediaType: r.mediaType || null,
+    mediaUrl: r.mediaUrl || null,
     replyTo: r.replyTo ? safeJsonParse(r.replyTo) : null,
   }));
 }
@@ -266,8 +277,8 @@ export function getDialogsFromDb() {
 export function saveMessage(message) {
   if (!message?.chatId || !message?.id) return;
 
-  upsertMsgStmt.run({
-    chatId: message.chatId,
+  insertMsgStmt.run({
+    chatId: String(message.chatId),
     msgId: String(message.id),
     sender: message.from === "me" ? "me" : "client",
     text: message.text || "",
@@ -276,10 +287,6 @@ export function saveMessage(message) {
     mediaUrl: message.mediaUrl || null,
     replyTo: message.replyTo ? JSON.stringify(message.replyTo) : null,
   });
-}
-
-export function countMessages(chatId) {
-  return countMessagesStmt.get(chatId)?.c || 0;
 }
 
 export function getLatestMessages(chatId, limit = 30) {
